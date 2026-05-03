@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GALAXY WARFARE: EVOLUTION OVERDRIVE</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&display=swap');
+
+        /* ---------------------------------------------------------
+           BASE STYLING & CORE ANIMATIONS
+           --------------------------------------------------------- */
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background: #000; overflow: hidden; font-family: 'Orbitron', sans-serif;
+            user-select: none; touch-action: none;
+        }
+
+        canvas { display: block; background: radial-gradient(circle at center, #001220 0%, #000000 100%); }
+
+        /* ---------------------------------------------------------
+           HEADS-UP DISPLAY (HUD)
+           --------------------------------------------------------- */
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 100;
+        }
+
+        .header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 20px; background: linear-gradient(to bottom, rgba(0, 210, 255, 0.2), transparent);
+        }
+
+        .stat-group { display: flex; flex-direction: column; }
+        .label { font-size: 10px; color: #00d2ff; letter-spacing: 2px; text-transform: uppercase; }
+        .value { font-size: 24px; color: #fff; font-weight: 900; text-shadow: 0 0 10px rgba(0, 210, 255, 0.8); }
+
+        .shield-container {
+            width: 150px; height: 10px; background: rgba(255, 255, 255, 0.1);
+            border: 1px solid #00d2ff; border-radius: 5px; margin-top: 5px; overflow: hidden;
+        }
+
+        #shield-fill {
+            width: 100%; height: 100%; background: linear-gradient(90deg, #00d2ff, #00f2fe);
+            box-shadow: 0 0 10px #00d2ff; transition: width 0.3s ease;
+        }
+
+        /* ---------------------------------------------------------
+           BOSS INTERFACE
+           --------------------------------------------------------- */
+        #boss-hud {
+            position: absolute; top: 100px; left: 50%; transform: translateX(-50%);
+            width: 80%; opacity: 0; transition: opacity 0.5s;
+        }
+
+        .boss-hp-bg { width: 100%; height: 15px; background: rgba(255, 0, 0, 0.1); border: 2px solid #ff3e3e; border-radius: 10px; position: relative; }
+        #boss-hp-fill { width: 100%; height: 100%; background: linear-gradient(90deg, #ff0000, #ff8c00); box-shadow: 0 0 15px #ff0000; }
+
+        /* ---------------------------------------------------------
+           ANNOUNCEMENTS & OVERLAYS
+           --------------------------------------------------------- */
+        .notification {
+            position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%);
+            text-align: center; opacity: 0; pointer-events: none;
+        }
+
+        .evo-text { font-size: 40px; font-weight: 900; color: #00d2ff; text-shadow: 0 0 30px #00d2ff; margin: 0; }
+        .sub-text { color: #fff; font-size: 14px; letter-spacing: 5px; }
+
+        .screen-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); display: none; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 200;
+        }
+
+        .btn-restart {
+            margin-top: 30px; padding: 15px 50px; background: transparent;
+            border: 2px solid #00d2ff; color: #00d2ff; font-weight: 900;
+            cursor: pointer; border-radius: 5px; transition: 0.3s; font-family: 'Orbitron';
+        }
+
+        .btn-restart:hover { background: #00d2ff; color: #000; box-shadow: 0 0 30px #00d2ff; }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div class="header">
+            <div class="stat-group">
+                <span class="label">Distance Traveled</span>
+                <span id="dist-count" class="value">0000</span>
+            </div>
+            <div class="stat-group" style="align-items: flex-end;">
+                <span id="rank-name" class="label">Pilot Rank: Rookie</span>
+                <div class="shield-container">
+                    <div id="shield-fill"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="boss-hud">
+            <div id="boss-label" class="label" style="text-align:center; color:#ff3e3e; margin-bottom:5px;">Threat Level: High</div>
+            <div class="boss-hp-bg">
+                <div id="boss-hp-fill"></div>
+            </div>
+        </div>
+
+        <div id="evo-notify" class="notification">
+            <p class="evo-text">EVOLUTION READY</p>
+            <p class="sub-text">ALL SYSTEMS UPGRADED</p>
+        </div>
+    </div>
+
+    <div id="game-over-screen" class="screen-overlay">
+        <h1 style="color:#ff3e3e; font-size: 50px;">MISSION FAILED</h1>
+        <p style="color:#fff; letter-spacing: 2px;">DISTANCE ACHIEVED: <span id="final-dist">0</span>M</p>
+        <button class="btn-restart" onclick="location.reload()">RE-INITIALIZE SYSTEMS</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+    /**
+     * -------------------------------------------------------------
+     * GALAXY WARFARE CORE ENGINE v4.0 (ZAYED EDITION)
+     * -------------------------------------------------------------
+     */
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    let width, height;
+    let distance = 0;
+    let frameCount = 0;
+    let gameRunning = true;
+    let shakeIntensity = 0;
+    let pilotLevel = 1;
+    let bossLevel = 1;
+
+    let stars = [];
+    let particles = [];
+    let playerBullets = [];
+    let enemyBullets = [];
+    let enemies = [];
+    let currentBoss = null;
+
+    const Assets = { player: [], boss: [], enemies: [], ready: false };
+
+    function initAssets() {
+        let loadedCount = 0;
+        const totalToLoad = 18;
+        function onLoaded() { loadedCount++; if (loadedCount >= totalToLoad) Assets.ready = true; }
+
+        for (let i = 1; i <= 6; i++) {
+            const p = new Image(); p.src = `p${i}.png`; p.onload = onLoaded; Assets.player.push(p);
+            const b = new Image(); b.src = `b${i}.png`; b.onload = onLoaded; Assets.boss.push(b);
+            const e = new Image(); e.src = `e${i}.png`; e.onload = onLoaded; Assets.enemies.push(e);
+        }
+    }
+
+    class Particle {
+        constructor(x, y, color) {
+            this.x = x; this.y = y;
+            this.vx = (Math.random() - 0.5) * 10;
+            this.vy = (Math.random() - 0.5) * 10;
+            this.alpha = 1; this.color = color;
+            this.size = Math.random() * 4 + 1;
+        }
+        update() { this.x += this.vx; this.y += this.vy; this.alpha -= 0.02; }
+        draw() {
+            ctx.globalAlpha = this.alpha; ctx.fillStyle = this.color;
+            ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    class Star {
+        constructor() { this.init(); }
+        init() {
+            this.x = Math.random() * width; this.y = Math.random() * height;
+            this.size = Math.random() * 2; this.speed = Math.random() * 3 + 1;
+            this.depth = Math.random() * 0.5 + 0.5;
+        }
+        update() { this.y += this.speed * this.depth; if (this.y > height) this.y = -10; }
+        draw() { ctx.fillStyle = `rgba(255, 255, 255, ${this.depth})`; ctx.fillRect(this.x, this.y, this.size, this.size); }
+    }
+
+    const Player = {
+        x: 0, y: 0, targetX: 0, targetY: 0, w: 80, h: 90, hp: 100,
+        update() {
+            this.x += (this.targetX - this.x) * 0.15;
+            this.y += (this.targetY - this.y) * 0.15;
+            let fireRate = Math.max(5, 12 - pilotLevel);
+            if (frameCount % fireRate === 0) this.shoot();
+        },
+        shoot() {
+            playerBullets.push(new Bullet(this.x, this.y - 40, 0, -20, 2 + pilotLevel));
+            if (pilotLevel >= 3) {
+                playerBullets.push(new Bullet(this.x - 30, this.y, -2, -18, 1));
+                playerBullets.push(new Bullet(this.x + 30, this.y, 2, -18, 1));
+            }
+            if (pilotLevel >= 5) playerBullets.push(new Bullet(this.x, this.y - 50, 0, -25, 15, true));
+        },
+        draw() {
+            const img = Assets.player[pilotLevel - 1];
+            if (img && img.complete) {
+                ctx.fillStyle = "#00d2ff"; ctx.beginPath();
+                ctx.moveTo(this.x - 10, this.y + 40); ctx.lineTo(this.x, this.y + 60 + Math.random() * 20);
+                ctx.lineTo(this.x + 10, this.y + 40); ctx.fill();
+                ctx.drawImage(img, this.x - this.w/2, this.y - this.h/2, this.w, this.h);
+            }
+        }
+    };
+
+    class Bullet {
+        constructor(x, y, vx, vy, dmg, special = false) {
+            this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.dmg = dmg; this.special = special;
+        }
+        update() { this.x += this.vx; this.y += this.vy; }
+        draw() {
+            ctx.fillStyle = this.special ? "#FFD700" : "#00D2FF";
+            ctx.fillRect(this.x - (this.special?4:2), this.y, (this.special?8:4), (this.special?30:20));
+        }
+    }
+
+    class Enemy {
+        constructor(lvl) {
+            this.x = Math.random() * (width - 60) + 30; this.y = -100;
+            this.lvl = lvl; this.hp = 4 * lvl;
+            this.speed = 2.5 + (lvl * 0.4); this.w = 65; this.h = 65;
+            this.sinX = Math.random() * 1000;
+        }
+        update() {
+            this.y += this.speed;
+            this.x += Math.sin(this.sinX + frameCount * 0.05) * 3;
+            
+            // --- ENEMY ATTACK SCALING (1x, 2x, 3x, 4x) ---
+            let shootInterval = Math.max(35, 110 - (this.lvl * 12)); 
+            if (frameCount % shootInterval === 0) {
+                const bSpeed = 6 + this.lvl;
+                if (this.lvl <= 2) {
+                    enemyBullets.push(new Bullet(this.x, this.y + 20, 0, bSpeed, 1));
+                } else if (this.lvl <= 4) {
+                    enemyBullets.push(new Bullet(this.x - 12, this.y + 20, -1.5, bSpeed, 1));
+                    enemyBullets.push(new Bullet(this.x + 12, this.y + 20, 1.5, bSpeed, 1));
+                } else if (this.lvl === 5) {
+                    enemyBullets.push(new Bullet(this.x - 20, this.y + 20, -2, bSpeed, 1));
+                    enemyBullets.push(new Bullet(this.x, this.y + 25, 0, bSpeed + 1, 1));
+                    enemyBullets.push(new Bullet(this.x + 20, this.y + 20, 2, bSpeed, 1));
+                } else {
+                    enemyBullets.push(new Bullet(this.x - 25, this.y + 20, -3, bSpeed, 1));
+                    enemyBullets.push(new Bullet(this.x - 8, this.y + 25, -1, bSpeed + 0.5, 1));
+                    enemyBullets.push(new Bullet(this.x + 8, this.y + 25, 1, bSpeed + 0.5, 1));
+                    enemyBullets.push(new Bullet(this.x + 25, this.y + 20, 3, bSpeed, 1));
+                }
+            }
+        }
+        draw() {
+            const img = Assets.enemies[this.lvl - 1];
+            if (img && img.complete) ctx.drawImage(img, this.x - this.w/2, this.y - this.h/2, this.w, this.h);
+        }
+    }
+
+    class Boss {
+        constructor(lvl) {
+            this.lvl = lvl; this.w = 250 + (lvl * 40); this.h = 180 + (lvl * 30);
+            this.x = width / 2; this.y = -300; this.hp = 400 * lvl; this.maxHp = 400 * lvl;
+            this.dir = 1; this.state = 'entering';
+        }
+        update() {
+            if (this.state === 'entering') { this.y += 2; if (this.y >= 150) this.state = 'moving'; }
+            else {
+                this.x += this.dir * (3 + this.lvl);
+                if (this.x > width - this.w/2 || this.x < this.w/2) this.dir *= -1;
+                if (frameCount % (60 - this.lvl * 5) === 0) {
+                    for (let i = -2; i <= 2; i++) enemyBullets.push(new Bullet(this.x + i * 40, this.y + 60, i * 2, 8, 1));
+                }
+            }
+        }
+        draw() {
+            const img = Assets.boss[this.lvl - 1];
+            if (img && img.complete) ctx.drawImage(img, this.x - this.w/2, this.y - this.h/2, this.w, this.h);
+        }
+    }
+
+    function createExplosion(x, y, color, count = 15) {
+        shakeIntensity = 15;
+        for (let i = 0; i < count; i++) particles.push(new Particle(x, y, color));
+    }
+
+    function checkEvolution() {
+        let newLvl = Math.min(6, Math.floor(distance / 1500) + 1);
+        if (newLvl > pilotLevel) {
+            pilotLevel = newLvl; Player.hp = 100; updateShieldUI();
+            const div = document.getElementById('evo-notify'); div.style.opacity = '1';
+            setTimeout(() => div.style.opacity = '0', 3000);
+            document.getElementById('rank-name').innerText = `Pilot Rank: ${["Rookie", "Scout", "Interceptor", "Commander", "Elite", "Legend"][pilotLevel-1]}`;
+        }
+        if (distance > 0 && distance % 2500 === 0 && !currentBoss && bossLevel <= 6) {
+            currentBoss = new Boss(bossLevel); document.getElementById('boss-hud').style.opacity = '1';
+        }
+    }
+
+    function updateShieldUI() {
+        const fill = document.getElementById('shield-fill'); fill.style.width = Player.hp + "%";
+        fill.style.background = Player.hp < 30 ? "red" : "linear-gradient(90deg, #00d2ff, #00f2fe)";
+    }
+
+    function takeHit(dmg) { Player.hp -= dmg; shakeIntensity = 10; updateShieldUI(); if (Player.hp <= 0) gameOver(); }
+
+    function gameOver() {
+        gameRunning = false; document.getElementById('game-over-screen').style.display = 'flex';
+        document.getElementById('final-dist').innerText = distance;
+    }
+
+    function resize() {
+        width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight;
+        Player.x = Player.targetX = width / 2; Player.y = Player.targetY = height - 150;
+    }
+
+    function setup() {
+        resize(); initAssets();
+        for (let i = 0; i < 100; i++) stars.push(new Star());
+        window.addEventListener('resize', resize);
+        window.addEventListener('touchmove', e => {
+            Player.targetX = e.touches[0].clientX; Player.targetY = e.touches[0].clientY - 60;
+        }, {passive: false});
+    }
+
+    function update() {
+        if (!gameRunning) return;
+        frameCount++; if (frameCount % 4 === 0) distance++;
+        document.getElementById('dist-count').innerText = distance.toString().padStart(4, '0');
+        checkEvolution();
+        stars.forEach(s => s.update());
+        Player.update();
+        particles.forEach((p, i) => { p.update(); if (p.alpha <= 0) particles.splice(i, 1); });
+        playerBullets.forEach((b, i) => {
+            b.update(); if (b.y < -50) playerBullets.splice(i, 1);
+            enemies.forEach((e, ei) => {
+                if (Math.hypot(b.x - e.x, b.y - e.y) < 40) {
+                    e.hp -= b.dmg; playerBullets.splice(i, 1); createExplosion(e.x, e.y, "#FF4500", 5);
+                    if (e.hp <= 0) { enemies.splice(ei, 1); createExplosion(e.x, e.y, "#FFD700", 20); }
+                }
+            });
+            if (currentBoss && b.x > currentBoss.x - currentBoss.w/2 && b.x < currentBoss.x + currentBoss.w/2 && b.y > currentBoss.y - currentBoss.h/2 && b.y < currentBoss.y + currentBoss.h/2) {
+                currentBoss.hp -= b.dmg; playerBullets.splice(i, 1);
+                document.getElementById('boss-hp-fill').style.width = (currentBoss.hp / currentBoss.maxHp * 100) + "%";
+                if (currentBoss.hp <= 0) { createExplosion(currentBoss.x, currentBoss.y, "#FF0000", 50); currentBoss = null; bossLevel++; document.getElementById('boss-hud').style.opacity = '0'; }
+            }
+        });
+        if (frameCount % 40 === 0 && !currentBoss) enemies.push(new Enemy(pilotLevel));
+        enemies.forEach((e, i) => {
+            e.update(); if (e.y > height + 100) enemies.splice(i, 1);
+            if (Math.hypot(e.x - Player.x, e.y - Player.y) < 50) { enemies.splice(i, 1); takeHit(20); createExplosion(Player.x, Player.y, "#FF0000", 15); }
+        });
+        enemyBullets.forEach((b, i) => { b.update(); if (b.y > height + 50) enemyBullets.splice(i, 1); if (Math.hypot(b.x - Player.x, b.y - Player.y) < 35) { enemyBullets.splice(i, 1); takeHit(10); } });
+        if (currentBoss) currentBoss.update();
+        if (shakeIntensity > 0) shakeIntensity *= 0.9;
+    }
+
+    function draw() {
+        ctx.save();
+        if (shakeIntensity > 1) ctx.translate((Math.random()-0.5)*shakeIntensity, (Math.random()-0.5)*shakeIntensity);
+        ctx.clearRect(0, 0, width, height);
+        stars.forEach(s => s.draw());
+        particles.forEach(p => p.draw());
+        playerBullets.forEach(b => b.draw());
+        enemyBullets.forEach(b => b.draw());
+        enemies.forEach(e => e.draw());
+        if (currentBoss) currentBoss.draw();
+        Player.draw();
+        ctx.restore();
+    }
+
+    function loop() { update(); draw(); requestAnimationFrame(loop); }
+    setup(); loop();
+    </script>
+</body>
+  </html>
